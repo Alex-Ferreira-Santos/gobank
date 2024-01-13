@@ -1,7 +1,6 @@
 package main
 
-import "fmt"
-
-func main(){
-	fmt.Println("Lets go")
+func main() {
+	server := NewApiServer(":3000")
+	server.Run()
 }
