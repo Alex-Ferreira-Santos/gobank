@@ -11,13 +11,13 @@ import (
 
 type APIServer struct {
 	listenAddress string
-	store Storage
+	store         Storage
 }
 
 func NewApiServer(listenAddress string, store Storage) *APIServer {
 	return &APIServer{
 		listenAddress: listenAddress,
-		store: store,
+		store:         store,
 	}
 }
 
@@ -26,7 +26,7 @@ func (server *APIServer) Run() {
 
 	router.HandleFunc("/account", makeHttpHandleFunc(server.handleAccount))
 
-	router.HandleFunc("/account/{id}", makeHttpHandleFunc(server.handleGetAccount))
+	router.HandleFunc("/account/{id}", makeHttpHandleFunc(server.handleGetAccountById))
 
 	log.Println("JSON API server running on port: ", server.listenAddress)
 
@@ -47,6 +47,15 @@ func (server *APIServer) handleAccount(writter http.ResponseWriter, request *htt
 }
 
 func (server *APIServer) handleGetAccount(writter http.ResponseWriter, request *http.Request) error {
+
+	account, err := server.store.GetAccounts()
+	if err != nil {
+		return err
+	}
+	return WriteJSON(writter, http.StatusOK, &account)
+}
+
+func (server *APIServer) handleGetAccountById(writter http.ResponseWriter, request *http.Request) error {
 	id := mux.Vars(request)["id"]
 	fmt.Println(id)
 	account := NewAccount("Alex", "Santos")
@@ -54,7 +63,18 @@ func (server *APIServer) handleGetAccount(writter http.ResponseWriter, request *
 }
 
 func (server *APIServer) handleCreateAccount(writter http.ResponseWriter, request *http.Request) error {
-	return nil
+
+	createAccountRequest := new(CreateAccountRequest)
+	if err := json.NewDecoder(request.Body).Decode(&createAccountRequest); err != nil {
+		return err
+	}
+
+	account := NewAccount(createAccountRequest.FirstName, createAccountRequest.LastName)
+
+	if err := server.store.CreateAccount(account); err != nil {
+		return err
+	}
+	return WriteJSON(writter, http.StatusOK, account)
 }
 
 func (server *APIServer) handleDeleteAccount(writter http.ResponseWriter, request *http.Request) error {
@@ -64,8 +84,6 @@ func (server *APIServer) handleDeleteAccount(writter http.ResponseWriter, reques
 func (server *APIServer) handleTransferAccount(writter http.ResponseWriter, request *http.Request) error {
 	return nil
 }
-
-
 
 func WriteJSON(writter http.ResponseWriter, status int, data any) error {
 	writter.Header().Set("Content-type", "application/json")
