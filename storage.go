@@ -59,18 +59,21 @@ func (store *PostgresStore) createAccountTable() error {
 func (store *PostgresStore) CreateAccount(account *Account) error {
 	query := `insert into account(first_name, last_name, number, balance) values ($1, $2, $3, $4)`
 
-	response, err := store.db.Exec(query, account.FirstName, account.LastName, account.Number, account.Balance)
+	_, err := store.db.Exec(query, account.FirstName, account.LastName, account.Number, account.Balance)
 
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("%v\n", response)
-
 	return nil
 }
 
 func (store *PostgresStore) DeleteAccount(id int) error {
+	_, err := store.db.Query("Update account set deleted_at = now() where id = $1", id)
+
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -79,29 +82,17 @@ func (store *PostgresStore) UpdateAccount(*Account) error {
 }
 
 func (store *PostgresStore) GetAccounts() ([]*Account, error) {
-	rows, err := store.db.Query("Select id, first_name, last_name, number, balance, created_at, updated_at, deleted_at from account")
+	rows, err := store.db.Query("Select id, first_name, last_name, number, balance, created_at, updated_at, deleted_at from account where deleted_at is null")
 	if err != nil {
 		return nil, err
 	}
 
 	accounts := []*Account{}
 	for rows.Next() {
-		account := new(Account)
-		err := rows.Scan(
-			&account.Id,
-			&account.FirstName,
-			&account.LastName,
-			&account.Number,
-			&account.Balance,
-			&account.CreatedAt,
-			&account.UpdateAt,
-			&account.DeleteAt,
-		)
-
+		account, err := scanIntoAccount(rows)
 		if err != nil {
 			return nil, err
 		}
-
 		accounts = append(accounts, account)
 	}
 
@@ -109,5 +100,30 @@ func (store *PostgresStore) GetAccounts() ([]*Account, error) {
 }
 
 func (store *PostgresStore) GetAccountById(id int) (*Account, error) {
-	return &Account{}, nil
+	rows, err := store.db.Query("Select id, first_name, last_name, number, balance, created_at, updated_at, deleted_at from account where id = $1", id)
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		return scanIntoAccount(rows)
+	}
+	return nil, fmt.Errorf("account %d not found", id)
 }
+
+func scanIntoAccount(rows *sql.Rows) (*Account, error) {
+	account := new(Account)
+	err := rows.Scan(
+		&account.Id,
+		&account.FirstName,
+		&account.LastName,
+		&account.Number,
+		&account.Balance,
+		&account.CreatedAt,
+		&account.UpdateAt,
+		&account.DeleteAt,
+	)
+
+	return account, err
+}
+
