@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
+	"github.com/Valgard/godotenv"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 )
 
@@ -27,7 +31,7 @@ func (server *APIServer) Run() {
 
 	router.HandleFunc("/account", makeHttpHandleFunc(server.handleAccount))
 
-	router.HandleFunc("/account/{id}", makeHttpHandleFunc(server.handleAccountById))
+	router.HandleFunc("/account/{id}", withJWTAuth(makeHttpHandleFunc(server.handleAccountById), server.store))
 
 	router.HandleFunc("/account/{id}/transfer", makeHttpHandleFunc(server.handleTransfer))
 
@@ -100,6 +104,14 @@ func (server *APIServer) handleCreateAccount(writter http.ResponseWriter, reques
 	if err := server.store.CreateAccount(account); err != nil {
 		return err
 	}
+
+	tokenString, err := createJWT(account)
+	if err != nil {
+		return err
+	}
+
+	fmt.Print(tokenString)
+
 	return WriteJSON(writter, http.StatusOK, account)
 }
 
@@ -132,6 +144,86 @@ func WriteJSON(writter http.ResponseWriter, status int, data any) error {
 	return json.NewEncoder(writter).Encode(data)
 }
 
+func createJWT(account *Account) (string, error) {
+	claims := &jwt.MapClaims{
+		"exp":           time.Now().Add(time.Hour * 1).Unix(),
+		"accountNumber": account.Number,
+	}
+
+	err := loadEnv()
+
+	if err != nil {
+		return "", fmt.Errorf("env file not found")
+	}
+
+	secret := os.Getenv("JWT_SECRET")
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+func permissionDenied(writter http.ResponseWriter) {
+	WriteJSON(writter, http.StatusForbidden, ApiError{Error: "permission denied"})
+}
+
+func withJWTAuth(handlerFunction http.HandlerFunc, store Storage) http.HandlerFunc {
+	return func(writter http.ResponseWriter, request *http.Request) {
+		fmt.Println("calling JWT auth middleware")
+
+		tokenString := request.Header.Get("x-jwt-token")
+
+		token, err := validateJWT(tokenString)
+
+		if err != nil {
+			permissionDenied(writter)
+			return
+		}
+
+		if !token.Valid {
+			permissionDenied(writter)
+			return
+		}
+
+		userId, err := getId(request)
+		if err != nil {
+			permissionDenied(writter)
+			return
+		}
+		account, err := store.GetAccountById(userId)
+		if err != nil {
+			permissionDenied(writter)
+			return
+		}
+
+		claims := token.Claims.(jwt.MapClaims)
+		if account.Number != int64(claims["accountNumber"].(float64)) {
+			permissionDenied(writter)
+			return
+		}
+
+		fmt.Print(claims)
+
+		handlerFunction(writter, request)
+	}
+}
+
+func validateJWT(tokenString string) (*jwt.Token, error) {
+	err := loadEnv()
+
+	if err != nil {
+		return nil, fmt.Errorf("env file not found")
+	}
+
+	secret := os.Getenv("JWT_SECRET")
+
+	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+
+		return []byte(secret), nil
+	})
+}
+
 type apiFunc func(http.ResponseWriter, *http.Request) error
 
 type ApiError struct {
@@ -153,4 +245,12 @@ func getId(request *http.Request) (int, error) {
 		return id, fmt.Errorf("Invalid id given %s", idString)
 	}
 	return id, nil
+}
+
+func loadEnv() error {
+	dotenv := godotenv.New()
+	if err := dotenv.Load(".env"); err != nil {
+		return fmt.Errorf("env file not found")
+	}
+	return nil
 }

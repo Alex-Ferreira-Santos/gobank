@@ -11,7 +11,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := store.Init(); err != nil  {
+	if err := store.Init(); err != nil {
 		log.Fatal(err)
 	}
 
